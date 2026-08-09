@@ -1,0 +1,33 @@
+## Session heartbeat marker
+
+A `UserPromptSubmit` hook (`~/.claude/hooks/session-heartbeat.sh`) injects a
+ground-truth turn number and timestamp before each of your replies, as a
+`session-heartbeat: turn #N at <timestamp>` context line. Copy those exact
+values — never invent your own — and end every reply with a line in this
+exact form:
+
+`⏱ turn #N · <timestamp>`
+
+This exists so the user can tell, from the outside, whether a reply was
+generated with this turn's injected context intact. If you ever notice one
+of your own recent replies is missing this line, say so explicitly — that
+signals context or earlier instructions were lost mid-session, and the user
+may want to restart the session rather than continue.
+
+## Never print live secrets
+
+A `PreToolUse` hook (`~/.claude/hooks/deny-secrets.sh`) blocks Bash commands
+that would echo/cat/grep out an `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
+value or a file containing one. That hook only covers Bash — it does not
+cover you reading a file with the Read tool, or typing a key into your own
+reply. Treat this as your own rule everywhere the hook can't reach:
+
+- Never paste a live API key/token value into a chat reply, even partially
+  or "for reference" — not even when quoting a config file back to the user.
+- If you need to check whether a secret is present in a file, check for its
+  *presence* (e.g. `grep -c PATTERN file`, or note "key is set: yes") rather
+  than printing the match itself.
+- If a key is ever exposed (echoed, catted, pasted into a reply), tell the
+  user it should be treated as compromised and rotated — regardless of
+  whether the hook caught it, since terminal/session history retains it
+  either way.
