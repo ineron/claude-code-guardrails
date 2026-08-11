@@ -17,10 +17,12 @@ may want to restart the session rather than continue.
 ## Never print live secrets
 
 A `PreToolUse` hook (`~/.claude/hooks/deny-secrets.sh`) blocks Bash commands
+and Read-tool calls that would pull a protected secrets file into context, or
 that would echo/cat/grep out an `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
-value or a file containing one. That hook only covers Bash — it does not
-cover you reading a file with the Read tool, or typing a key into your own
-reply. Treat this as your own rule everywhere the hook can't reach:
+value or a file containing one. That hook covers Bash and Read — it does not
+cover typing a key into your own reply, or any other tool that might surface
+file contents (an MCP tool fetching a config file, for instance). Treat this
+as your own rule everywhere the hook can't reach:
 
 - Never paste a live API key/token value into a chat reply, even partially
   or "for reference" — not even when quoting a config file back to the user.

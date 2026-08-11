@@ -13,6 +13,7 @@ import time
 
 SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 
+PRETOOL_MATCHER = "Bash|Read"
 PRETOOL_ENTRY = {"type": "command", "command": "~/.claude/hooks/deny-secrets.sh"}
 USERPROMPT_ENTRY = {"type": "command", "command": "~/.claude/hooks/session-heartbeat.sh"}
 
@@ -49,16 +50,20 @@ def install():
     hooks = data.setdefault("hooks", {})
 
     pretool = hooks.setdefault("PreToolUse", [])
-    bash_entry = next((e for e in pretool if e.get("matcher") == "Bash"), None)
-    if bash_entry is None:
-        bash_entry = {"matcher": "Bash", "hooks": []}
-        pretool.append(bash_entry)
-    bash_hooks = bash_entry.setdefault("hooks", [])
-    if has_hook(bash_hooks, "deny-secrets.sh"):
-        print("deny-secrets.sh already registered in PreToolUse, skipping")
+    # Find by hook presence, not by matcher value — an existing install may
+    # still have the pre-upgrade "Bash"-only matcher, and we want to widen
+    # that entry in place rather than add a second, duplicate registration.
+    entry = next((e for e in pretool if has_hook(e.get("hooks", []), "deny-secrets.sh")), None)
+    if entry is None:
+        entry = {"matcher": PRETOOL_MATCHER, "hooks": [PRETOOL_ENTRY]}
+        pretool.append(entry)
+        print(f"Added deny-secrets.sh to PreToolUse[{PRETOOL_MATCHER}]")
+    elif entry.get("matcher") != PRETOOL_MATCHER:
+        old_matcher = entry.get("matcher")
+        entry["matcher"] = PRETOOL_MATCHER
+        print(f"Upgraded deny-secrets.sh matcher: {old_matcher!r} -> {PRETOOL_MATCHER!r} (now also covers Read)")
     else:
-        bash_hooks.append(PRETOOL_ENTRY)
-        print("Added deny-secrets.sh to PreToolUse[Bash]")
+        print(f"deny-secrets.sh already registered in PreToolUse[{PRETOOL_MATCHER}], skipping")
 
     userprompt = hooks.setdefault("UserPromptSubmit", [])
     generic_entry = next((e for e in userprompt if "matcher" not in e), None)

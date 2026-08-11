@@ -4,9 +4,9 @@ Two small, independent [Claude Code](https://claude.com/claude-code) hooks:
 
 1. **session-heartbeat** — makes context/instruction loss in a long session
    *visible* instead of silent.
-2. **deny-secrets** — blocks Bash commands that would print a live
-   `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` (or a file containing one) to
-   the terminal or chat.
+2. **deny-secrets** — blocks Bash commands and Read-tool calls that would
+   print or pull into context a live `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
+   (or a file containing one).
 
 Both are user-level (`~/.claude/`), so once installed they apply to every
 project you open with Claude Code — not just one repo.
@@ -54,33 +54,45 @@ the marker. It's a smoke detector, not a fire suppressor.
 ### deny-secrets
 
 `hooks/deny-secrets.sh` (thin wrapper) → `hooks/lib/secret_scan.py` runs on
-the `PreToolUse` event for the `Bash` matcher and denies the command before
-it executes if it looks like it would expose a secret:
+the `PreToolUse` event for the `Bash|Read` matcher and denies the action
+before it executes if it looks like it would expose a secret:
 
 - **Known secret-bearing filenames**: `.env` (and `.env.local`/`.production`/
   etc., but not `.env.example`), `.pgpass`, `id_rsa`/`id_ed25519`,
-  `credentials.json`, `service-account*.json`, `*.pem`, `*.key`.
-- **Env-var dumps**: `echo $ANTHROPIC_API_KEY`, `printenv | grep anthropic`,
-  `export | grep ...`, etc. — matched across pipes, since the value ends up
-  printed either way.
-- **Content-based, filename-agnostic**: if the command references an
-  *existing file* on disk, the file's actual contents are scanned for
-  something shaped like a live key (`sk-ant-...`, `ANTHROPIC_API_KEY=...`,
-  AWS-style `AKIA...`, etc.) and the command is denied if found — this is
-  what catches a config file that isn't secret *by name* (e.g.
-  `~/.claude/settings.json`) but has ended up with a real key pasted into
-  its `env` block.
+  `credentials.json`, `service-account*.json`, `*.pem`, `*.key`. Checked
+  against both the Bash command line and a Read call's `file_path`.
+- **Env-var dumps** (Bash only): `echo $ANTHROPIC_API_KEY`,
+  `printenv | grep anthropic`, `export | grep ...`, etc. — matched across
+  pipes, since the value ends up printed either way.
+- **Content-based, filename-agnostic**: if a Bash command references an
+  *existing file* on disk, or a Read call targets one, the file's actual
+  contents are scanned for something shaped like a live key
+  (`sk-ant-...`, `ANTHROPIC_API_KEY=...`, AWS-style `AKIA...`, etc.) and the
+  action is denied if found — this is what catches a config file that isn't
+  secret *by name* (e.g. `~/.claude/settings.json`) but has ended up with a
+  real key pasted into its `env` block.
 
 A plain `grep ANTHROPIC_API_KEY some_source_file.py` (searching code for
 where the variable is *referenced*, not dumping its value) is intentionally
 left alone — see `hooks/lib/secret_scan.py` for the exact patterns.
 
-This only covers Bash. It cannot stop the model from reading a key with the
-Read tool or typing it into a chat reply — for that, `snippets/CLAUDE.md.snippet`
-adds a standing instruction ("never paste a live key into a reply, check
-presence instead of printing values, treat any exposed key as compromised").
-That part is soft enforcement (a written rule the model follows), not a hard
-technical block — the Bash hook is the hard block.
+**Why Read is covered, not just Bash**: the moment a secret enters the
+model's context — as a Read result, same as a Bash command's output — it has
+already left the workspace as part of the request sent to the API, whether
+or not the model goes on to repeat it in a visible reply. Claude Code has no
+hook that can intercept or redact the model's own response text (it's
+streamed as it's generated), so a "catch it in the output" gate isn't
+buildable even in principle. The only enforceable boundary is upstream: stop
+the tool call that would read the secret into context at all. That's what
+the `Bash|Read` matcher does; it does not cover typing a key into a chat
+reply from a source *other* than a blocked file (e.g. a key the model
+already had in context from earlier in the conversation), or any other tool
+that might surface file contents (an MCP tool fetching a remote config,
+for instance) — for those, `snippets/CLAUDE.md.snippet` adds a standing
+instruction ("never paste a live key into a reply, check presence instead of
+printing values, treat any exposed key as compromised"). That part is soft
+enforcement (a written rule the model follows), not a hard technical block —
+the `Bash|Read` hook is the hard block.
 
 ## Install
 
@@ -139,9 +151,13 @@ before editing, same as install.
   when something *might* have gone wrong (marker missing), it doesn't fix
   the underlying context loss or force the model to keep following
   instructions it no longer has.
-- **deny-secrets** only wraps the Bash tool. Other tools that can surface
-  file contents (Read, an MCP tool that fetches a config file, etc.) aren't
-  covered by the hook — only by the softer CLAUDE.md instruction.
+- **deny-secrets** wraps Bash and Read. Other tools that can surface file
+  contents (an MCP tool that fetches a remote config file, Grep/Glob results
+  that happen to include a matched secret line, etc.) aren't covered by the
+  hook — only by the softer CLAUDE.md instruction. Same for a secret the
+  model already has in context from earlier in the conversation and pastes
+  into a reply — the hook only stops a *new* protected read, not reuse of
+  something already in context.
 - Pattern matching is heuristic (regex-based), not a full secret scanner —
   it's tuned for Anthropic keys/tokens plus a few common secret-file
   patterns, not a general-purpose tool like `gitleaks` or `trufflehog`. If
