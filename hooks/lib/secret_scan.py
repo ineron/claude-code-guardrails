@@ -32,6 +32,9 @@ import shlex
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from secret_patterns import SECRET_VALUE_RE  # noqa: E402
+
 
 def deny(reason: str) -> None:
     print(json.dumps({
@@ -62,15 +65,6 @@ PROTECTED_FILE_RE = re.compile(
     r"""|service-account[^/\s]*\.json([^a-zA-Z0-9_.-]|$)"""
     r"""|[^/\s]+\.(pem|key)([^a-zA-Z0-9_.-]|$))""",
     re.IGNORECASE,
-)
-
-# Content-based check, shared by both the Bash and Read paths below: flags
-# anything shaped like a live key regardless of which file it's sitting in.
-SECRET_VALUE_RE = re.compile(
-    r"sk-ant-[A-Za-z0-9_-]{20,}"
-    r"|sk-proj-[A-Za-z0-9_-]{20,}"
-    r"|AKIA[0-9A-Z]{16}"
-    r"|ANTHROPIC_(API_KEY|AUTH_TOKEN)[\"' ]*[:=][\"' ]*[A-Za-z0-9._-]{16,}"
 )
 
 if tool_name == "Read":

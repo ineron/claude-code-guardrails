@@ -19,15 +19,11 @@ stable across Claude Code versions — recursing over every string value is
 robust to that in a way hardcoding a field path would not be.
 """
 import json
-import re
+import os
 import sys
 
-SECRET_VALUE_RE = re.compile(
-    r"sk-ant-[A-Za-z0-9_-]{20,}"
-    r"|sk-proj-[A-Za-z0-9_-]{20,}"
-    r"|AKIA[0-9A-Z]{16}"
-    r"|ANTHROPIC_(API_KEY|AUTH_TOKEN)[\"' ]*[:=][\"' ]*[A-Za-z0-9._-]{16,}"
-)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from secret_patterns import SECRET_VALUE_RE  # noqa: E402
 
 
 def find_secret(obj):

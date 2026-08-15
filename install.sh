@@ -9,8 +9,9 @@ cp "$DIR/hooks/warn-secrets-posttooluse.sh" "$HOME/.claude/hooks/warn-secrets-po
 cp "$DIR/hooks/session-heartbeat.sh" "$HOME/.claude/hooks/session-heartbeat.sh"
 cp "$DIR/hooks/lib/secret_scan.py" "$HOME/.claude/hooks/lib/secret_scan.py"
 cp "$DIR/hooks/lib/secret_scan_posttooluse.py" "$HOME/.claude/hooks/lib/secret_scan_posttooluse.py"
+cp "$DIR/hooks/lib/secret_patterns.py" "$HOME/.claude/hooks/lib/secret_patterns.py"
 chmod 755 "$HOME/.claude/hooks/deny-secrets.sh" "$HOME/.claude/hooks/warn-secrets-posttooluse.sh" "$HOME/.claude/hooks/session-heartbeat.sh"
-chmod 644 "$HOME/.claude/hooks/lib/secret_scan.py" "$HOME/.claude/hooks/lib/secret_scan_posttooluse.py"
+chmod 644 "$HOME/.claude/hooks/lib/secret_scan.py" "$HOME/.claude/hooks/lib/secret_scan_posttooluse.py" "$HOME/.claude/hooks/lib/secret_patterns.py"
 echo "Copied hook scripts to ~/.claude/hooks/"
 
 python3 "$DIR/scripts/merge_settings.py" install
