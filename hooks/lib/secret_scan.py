@@ -15,11 +15,21 @@ on to repeat it in a visible reply. There is no hook that can intercept or
 redact the model's own response text (Claude Code streams it), so the only
 enforceable boundary is upstream, at the tool call that would read the
 secret into context in the first place.
+
+`pm2 logs <app>` gets the same upstream treatment even though it isn't a
+file read: it replays a managed process's log files, which the hook
+resolves itself via `pm2 jlist` and pre-scans before allowing the command.
+Other output-dumping commands (docker logs, kubectl logs, curl, journalctl,
+...) aren't pre-scanned this way — there's no generic way to resolve "what
+file/stream will this print" ahead of running it — so they're instead
+covered reactively by secret_scan_posttooluse.py, which can't stop the
+output but does surface an immediate warning once it's out.
 """
 import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 
 
@@ -107,6 +117,70 @@ if PROTECTED_FILE_RE.search(command):
         "Use the application/database client that consumes the credentials "
         "instead."
     )
+
+# `pm2 logs <app>` (and `pm2 log`) replay a managed process's accumulated
+# stdout/stderr, which commonly includes DEBUG-level output an app never
+# meant to expose (e.g. a credentials dict logged verbatim). Unlike the
+# checks above, there's no filename or env-dump keyword in the command text
+# to key off — the file pm2 reads from is resolved internally. So instead we
+# resolve it ourselves via `pm2 jlist` (read-only) and pre-scan the same log
+# files pm2 would print from, before allowing the command through.
+PM2_LOGS_RE = re.compile(r"(?:^|[;&|]\s*)pm2\s+(logs|log)\b")
+
+if PM2_LOGS_RE.search(command):
+    try:
+        cmd_tokens = shlex.split(command, posix=True)
+    except ValueError:
+        cmd_tokens = command.split()
+
+    app_arg = None
+    for i, tok in enumerate(cmd_tokens):
+        if tok in ("logs", "log") and i > 0 and cmd_tokens[i - 1] == "pm2":
+            for nxt in cmd_tokens[i + 1:]:
+                if not nxt.startswith("-"):
+                    app_arg = nxt
+                break
+            break
+
+    try:
+        jlist_out = subprocess.run(
+            ["pm2", "jlist"], capture_output=True, text=True, timeout=5,
+        ).stdout
+        procs = json.loads(jlist_out)
+    except Exception:
+        procs = None  # pm2 unavailable/unparseable: fail open, allow through
+
+    if procs:
+        log_paths = set()
+        for proc in procs:
+            name = proc.get("name", "")
+            pm_id = str(proc.get("pm_id", ""))
+            if app_arg and app_arg not in (name, pm_id):
+                continue
+            env = proc.get("pm2_env", {}) or {}
+            for key in ("pm_out_log_path", "pm_err_log_path"):
+                p = env.get(key)
+                if p and os.path.isfile(p):
+                    log_paths.add(p)
+
+        for path in log_paths:
+            try:
+                size = os.path.getsize(path)
+                with open(path, "r", errors="ignore") as f:
+                    f.seek(max(0, size - 500_000))
+                    content = f.read()
+            except Exception:
+                continue
+            if SECRET_VALUE_RE.search(content):
+                deny(
+                    f"BLOCKED: recent output of pm2-managed log '{path}' "
+                    "contains what looks like a live API key/secret. "
+                    "'pm2 logs' would print it straight into this session. "
+                    "Fix the app to redact secrets before logging them, "
+                    "restart the pm2 process so the fix is live, then retry. "
+                    "To check without printing the value, use something "
+                    "like 'grep -c PATTERN file'."
+                )
 
 # Commands that dump an Anthropic key/token env var directly (echo
 # $ANTHROPIC_API_KEY, printenv, env | grep anthropic, export | grep ..., etc.)

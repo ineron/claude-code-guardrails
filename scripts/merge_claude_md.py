@@ -35,15 +35,30 @@ def install():
         with open(CLAUDE_MD_PATH) as f:
             existing = f.read()
 
-    if BEGIN_MARKER in existing:
-        print("guardrails section already present in CLAUDE.md, skipping")
-        return
-
     with open(SNIPPET_PATH) as f:
         snippet = f.read().strip()
+    block = f"{BEGIN_MARKER}\n{snippet}\n{END_MARKER}\n"
+
+    if BEGIN_MARKER in existing:
+        if END_MARKER not in existing:
+            print(f"WARNING: {BEGIN_MARKER!r} found without matching end marker "
+                  "in CLAUDE.md — leaving it untouched, fix manually.", file=sys.stderr)
+            return
+        start = existing.index(BEGIN_MARKER)
+        end = existing.index(END_MARKER) + len(END_MARKER)
+        current_block = existing[start:end] + "\n"
+        # Compare ignoring trailing newline noise
+        if existing[start:end].strip() == block.strip():
+            print("guardrails section already present and up to date, skipping")
+            return
+        backup()
+        new_content = existing[:start] + block + existing[end + 1:].lstrip("\n")
+        with open(CLAUDE_MD_PATH, "w") as f:
+            f.write(new_content)
+        print(f"Updated guardrails section in {CLAUDE_MD_PATH} (snippet had changed)")
+        return
 
     backup()
-    block = f"{BEGIN_MARKER}\n{snippet}\n{END_MARKER}\n"
     if existing.strip():
         new_content = existing.rstrip("\n") + "\n\n" + block
     else:

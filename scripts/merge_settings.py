@@ -15,6 +15,8 @@ SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 
 PRETOOL_MATCHER = "Bash|Read"
 PRETOOL_ENTRY = {"type": "command", "command": "~/.claude/hooks/deny-secrets.sh"}
+POSTTOOL_MATCHER = "Bash"
+POSTTOOL_ENTRY = {"type": "command", "command": "~/.claude/hooks/warn-secrets-posttooluse.sh"}
 USERPROMPT_ENTRY = {"type": "command", "command": "~/.claude/hooks/session-heartbeat.sh"}
 
 
@@ -65,6 +67,15 @@ def install():
     else:
         print(f"deny-secrets.sh already registered in PreToolUse[{PRETOOL_MATCHER}], skipping")
 
+    posttool = hooks.setdefault("PostToolUse", [])
+    post_entry = next((e for e in posttool if has_hook(e.get("hooks", []), "warn-secrets-posttooluse.sh")), None)
+    if post_entry is None:
+        post_entry = {"matcher": POSTTOOL_MATCHER, "hooks": [POSTTOOL_ENTRY]}
+        posttool.append(post_entry)
+        print(f"Added warn-secrets-posttooluse.sh to PostToolUse[{POSTTOOL_MATCHER}]")
+    else:
+        print(f"warn-secrets-posttooluse.sh already registered in PostToolUse[{POSTTOOL_MATCHER}], skipping")
+
     userprompt = hooks.setdefault("UserPromptSubmit", [])
     generic_entry = next((e for e in userprompt if "matcher" not in e), None)
     if generic_entry is None:
@@ -97,6 +108,15 @@ def uninstall():
         hooks["PreToolUse"] = pretool
     else:
         hooks.pop("PreToolUse", None)
+
+    posttool = hooks.get("PostToolUse", [])
+    for entry in posttool:
+        entry["hooks"] = [h for h in entry.get("hooks", []) if "warn-secrets-posttooluse.sh" not in h.get("command", "")]
+    posttool = [e for e in posttool if e.get("hooks")]
+    if posttool:
+        hooks["PostToolUse"] = posttool
+    else:
+        hooks.pop("PostToolUse", None)
 
     userprompt = hooks.get("UserPromptSubmit", [])
     for entry in userprompt:

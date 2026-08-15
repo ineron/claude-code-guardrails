@@ -19,10 +19,13 @@ may want to restart the session rather than continue.
 A `PreToolUse` hook (`~/.claude/hooks/deny-secrets.sh`) blocks Bash commands
 and Read-tool calls that would pull a protected secrets file into context, or
 that would echo/cat/grep out an `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
-value or a file containing one. That hook covers Bash and Read — it does not
-cover typing a key into your own reply, or any other tool that might surface
-file contents (an MCP tool fetching a config file, for instance). Treat this
-as your own rule everywhere the hook can't reach:
+value or a file containing one — including `pm2 logs <app>`, which it
+pre-resolves via `pm2 jlist` and content-scans before allowing. That hook
+covers Bash and Read — it does not cover typing a key into your own reply,
+or any other tool that might surface file contents (an MCP tool fetching a
+config file, `docker logs`, `kubectl logs`, `curl`, `journalctl`, or any
+other command whose output isn't predictable ahead of time). Treat this as
+your own rule everywhere the hook can't reach:
 
 - Never paste a live API key/token value into a chat reply, even partially
   or "for reference" — not even when quoting a config file back to the user.
@@ -33,3 +36,12 @@ as your own rule everywhere the hook can't reach:
   user it should be treated as compromised and rotated — regardless of
   whether the hook caught it, since terminal/session history retains it
   either way.
+
+A `PostToolUse` hook (`~/.claude/hooks/warn-secrets-posttooluse.sh`) catches
+what `PreToolUse` can't predict: it scans every completed Bash tool result
+for a live-secret-shaped string and, if found, feeds you a `SECRET EXPOSURE
+DETECTED` message via stderr (exit code 2). It cannot undo the exposure —
+the tool already ran and the output is already in your context — so when
+you see that message, treat it exactly like noticing the leak yourself:
+tell the user immediately that the key must be rotated, and do not repeat
+the full value again in your own reply.
