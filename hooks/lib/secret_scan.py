@@ -19,6 +19,15 @@ secret into context in the first place.
 `pm2 logs <app>` gets the same upstream treatment even though it isn't a
 file read: it replays a managed process's log files, which the hook
 resolves itself via `pm2 jlist` and pre-scans before allowing the command.
+
+`pm2 jlist` / `pm2 describe` / `pm2 show` get similar treatment for a
+different reason: their JSON output includes each process's full `pm2_env`
+block verbatim, which is however that process was launched — env vars,
+secrets included, with no redaction. There's no file to resolve here (the
+command's own output *is* the dump), so instead the hook runs `pm2 jlist`
+itself (read-only) and pre-scans the resulting JSON before allowing the
+original command through.
+
 Other output-dumping commands (docker logs, kubectl logs, curl, journalctl,
 ...) aren't pre-scanned this way — there's no generic way to resolve "what
 file/stream will this print" ahead of running it — so they're instead
@@ -175,6 +184,33 @@ if PM2_LOGS_RE.search(command):
                     "To check without printing the value, use something "
                     "like 'grep -c PATTERN file'."
                 )
+
+# `pm2 jlist` / `pm2 describe <app>` / `pm2 show <app>` print each managed
+# process's pm2_env block, which is that process's actual environment —
+# secrets included — as plain JSON, no redaction. Unlike pm2 logs there's no
+# separate log file to pre-scan: the command's own output is the dump. So we
+# run `pm2 jlist` ourselves (read-only) and scan it before allowing the
+# original command through.
+PM2_ENV_DUMP_RE = re.compile(r"(?:^|[;&|]\s*)pm2\s+(jlist|describe|show|env)\b")
+
+if PM2_ENV_DUMP_RE.search(command):
+    try:
+        jlist_out = subprocess.run(
+            ["pm2", "jlist"], capture_output=True, text=True, timeout=5,
+        ).stdout
+    except Exception:
+        jlist_out = ""  # pm2 unavailable: fail open, allow through
+
+    if jlist_out and SECRET_VALUE_RE.search(jlist_out):
+        deny(
+            "BLOCKED: this pm2 command would print a process's pm2_env "
+            "block, which contains what looks like a live API key/secret "
+            "in that process's environment. 'pm2 jlist'/'describe'/'show' "
+            "dump env vars with no redaction. If you only need process "
+            "state, filter to specific safe fields instead, e.g. "
+            "\"pm2 jlist | jq '.[] | {name, pm_id, status: .pm2_env.status, "
+            "pid}'\"."
+        )
 
 # Commands that dump an Anthropic key/token env var directly (echo
 # $ANTHROPIC_API_KEY, printenv, env | grep anthropic, export | grep ..., etc.)
