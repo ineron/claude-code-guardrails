@@ -15,6 +15,8 @@ SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 
 PRETOOL_MATCHER = "Bash|Read"
 PRETOOL_ENTRY = {"type": "command", "command": "~/.claude/hooks/deny-secrets.sh"}
+CROSS_PROJECT_MATCHER = "Bash|Edit|Write|NotebookEdit"
+CROSS_PROJECT_ENTRY = {"type": "command", "command": "~/.claude/hooks/deny-cross-project-edit.sh"}
 POSTTOOL_MATCHER = "Bash"
 POSTTOOL_ENTRY = {"type": "command", "command": "~/.claude/hooks/warn-secrets-posttooluse.sh"}
 USERPROMPT_ENTRY = {"type": "command", "command": "~/.claude/hooks/session-heartbeat.sh"}
@@ -67,6 +69,18 @@ def install():
     else:
         print(f"deny-secrets.sh already registered in PreToolUse[{PRETOOL_MATCHER}], skipping")
 
+    cp_entry = next((e for e in pretool if has_hook(e.get("hooks", []), "deny-cross-project-edit.sh")), None)
+    if cp_entry is None:
+        cp_entry = {"matcher": CROSS_PROJECT_MATCHER, "hooks": [CROSS_PROJECT_ENTRY]}
+        pretool.append(cp_entry)
+        print(f"Added deny-cross-project-edit.sh to PreToolUse[{CROSS_PROJECT_MATCHER}]")
+    elif cp_entry.get("matcher") != CROSS_PROJECT_MATCHER:
+        old_matcher = cp_entry.get("matcher")
+        cp_entry["matcher"] = CROSS_PROJECT_MATCHER
+        print(f"Upgraded deny-cross-project-edit.sh matcher: {old_matcher!r} -> {CROSS_PROJECT_MATCHER!r}")
+    else:
+        print(f"deny-cross-project-edit.sh already registered in PreToolUse[{CROSS_PROJECT_MATCHER}], skipping")
+
     posttool = hooks.setdefault("PostToolUse", [])
     post_entry = next((e for e in posttool if has_hook(e.get("hooks", []), "warn-secrets-posttooluse.sh")), None)
     if post_entry is None:
@@ -102,7 +116,11 @@ def uninstall():
 
     pretool = hooks.get("PreToolUse", [])
     for entry in pretool:
-        entry["hooks"] = [h for h in entry.get("hooks", []) if "deny-secrets.sh" not in h.get("command", "")]
+        entry["hooks"] = [
+            h for h in entry.get("hooks", [])
+            if "deny-secrets.sh" not in h.get("command", "")
+            and "deny-cross-project-edit.sh" not in h.get("command", "")
+        ]
     pretool = [e for e in pretool if e.get("hooks")]
     if pretool:
         hooks["PreToolUse"] = pretool

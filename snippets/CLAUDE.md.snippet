@@ -45,3 +45,20 @@ the tool already ran and the output is already in your context — so when
 you see that message, treat it exactly like noticing the leak yourself:
 tell the user immediately that the key must be rotated, and do not repeat
 the full value again in your own reply.
+
+## Never edit another registered project's files directly
+
+A `PreToolUse` hook (`~/.claude/hooks/deny-cross-project-edit.sh`) blocks
+Edit/Write/NotebookEdit calls, and write-shaped Bash commands (redirects,
+`sed -i`, `cp`/`mv`/`rm`, `git commit`/`push`/etc., opening an editor, ...),
+whose target path resolves inside a *different* project than the one this
+session is running in — "different project" meaning a directory (or an
+ancestor of the target path) with its own `.claude/settings.json` whose
+`project.slug` differs from this session's own. If you get denied by this
+hook: do not retry with a different command to route around it. Instead,
+treat it the same as any cross-project request you decide on your own
+initiative — send a question/notice or file a task through whatever
+cross-session channel this repo uses (e.g. `message_send`/
+`memory_upsert(kind="task", filed_from_project=...)` if this is a
+memory-bank-mcp project), or, if no such channel applies here, stop and ask
+the user directly before touching that project's files.

@@ -1,15 +1,20 @@
 # claude-code-guardrails
 
-Two small, independent [Claude Code](https://claude.com/claude-code) hooks:
+Three small, independent [Claude Code](https://claude.com/claude-code) hooks:
 
 1. **session-heartbeat** — makes context/instruction loss in a long session
    *visible* instead of silent.
 2. **deny-secrets** — blocks Bash commands and Read-tool calls that would
    print or pull into context a live `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`
    (or a file containing one).
+3. **deny-cross-project-edit** — blocks Edit/Write/NotebookEdit calls, and
+   write-shaped Bash commands, whose target path resolves inside a
+   *different* registered Claude Code project (identified by
+   `.claude/settings.json`'s `project.slug`) than the one the current
+   session is running in.
 
-Both are user-level (`~/.claude/`), so once installed they apply to every
-project you open with Claude Code — not just one repo.
+All three are user-level (`~/.claude/`), so once installed they apply to
+every project you open with Claude Code — not just one repo.
 
 ## Why
 
@@ -20,9 +25,17 @@ was told two hundred turns ago. Separately, it's easy to have Claude `cat`
 or `echo` a config file that happens to contain a live API key, especially
 when debugging config issues.
 
-Neither of these is solved by asking the model to "be careful" — a model
-that has already lost the relevant instruction can't be careful about the
-instruction it lost. Both problems needed enforcement outside the model:
+A third, related problem: a session working in one project can have
+filesystem access to *other* projects too (they're often sibling
+directories), and a model that decides some other project needs a fix can
+just go edit it directly instead of routing the request through that
+project's own session/owner. Written instructions to not do this ("ask
+first", "send a message instead") are exactly as reliable as any other
+written instruction the model might have lost track of.
+
+None of these three is solved by asking the model to "be careful" — a model
+that has already lost (or never had) the relevant instruction can't be
+careful about it. All three problems needed enforcement outside the model:
 a hook that runs regardless of what the model currently believes.
 
 ## How it works
@@ -94,6 +107,50 @@ printing values, treat any exposed key as compromised"). That part is soft
 enforcement (a written rule the model follows), not a hard technical block —
 the `Bash|Read` hook is the hard block.
 
+### deny-cross-project-edit
+
+`hooks/deny-cross-project-edit.sh` (thin wrapper) →
+`hooks/lib/cross_project_guard.py` runs on the `PreToolUse` event for the
+`Bash|Edit|Write|NotebookEdit` matcher.
+
+"Registered project" is defined purely by filesystem convention, with no
+external state: a directory is a project root if it (or an ancestor) has a
+`.claude/settings.json` with a non-empty `project.slug`. The hook walks up
+from the session's own `cwd` to find its own project's slug, then for each
+tool call's target path(s) walks up from *that* path the same way. If the
+two slugs differ, it denies the call. If either side has no such marker —
+the session's own directory isn't a registered project, or the target path
+isn't inside one — the hook allows the call through (fails open): it only
+enforces a boundary it can actually see on disk, never guesses at one.
+
+- **Edit / Write / NotebookEdit**: checked directly against `file_path` /
+  `notebook_path`.
+- **Bash**: classification-based, not a blanket path check. A command is
+  only denied if it's write-shaped — a `>`/`>>` redirect, or one of a fixed
+  list of mutating verbs/editors (`sed -i`, `cp`, `mv`, `rm`, `mkdir`,
+  `chmod`, `git commit`/`push`/`checkout`/..., `npm install`, `vim`/`nano`/
+  `code`, etc.) — *and* it references a path under a foreign project.
+  Read-only commands (`cat`, `grep`, `ls`, `git log`/`diff`/`status`, ...)
+  are left alone even when they reference another project's files — this
+  hook enforces "don't edit it directly", not "don't look at it".
+
+The deny message doesn't just say no — it tells the model what to do
+instead: if the repo uses the memory-bank-mcp pattern (an MCP server for
+cross-session/cross-project memory that happens to use this same
+`.claude/settings.json` `project.slug` convention), send a
+`message_send`/`memory_upsert(kind="task", filed_from_project=...)` to the
+target project's slug instead of touching its files; otherwise, stop and
+ask the user for explicit confirmation first.
+
+**Why filesystem convention instead of a lookup table**: there's no shared
+database this generic, standalone hook can assume exists — project ↔
+directory mappings live (if anywhere) inside whatever tool a given repo
+uses for cross-session memory, and that tool's own schema may not even
+store filesystem paths (memory-bank-mcp's doesn't — only slugs). The
+`.claude/settings.json` convention is the one thing guaranteed to sit next
+to the code itself, so it's the only stable place to key off of without
+adding a dependency.
+
 ## Install
 
 ```bash
@@ -123,9 +180,10 @@ new hook registrations.
 ## Disable / uninstall
 
 **Turn off just one hook** without uninstalling: comment out or delete its
-entry under `hooks.PreToolUse` (for deny-secrets) or `hooks.UserPromptSubmit`
-(for session-heartbeat) in `~/.claude/settings.json`. The two are fully
-independent — removing one doesn't affect the other.
+entry under `hooks.PreToolUse` (deny-secrets and deny-cross-project-edit
+are separate entries there) or `hooks.UserPromptSubmit` (for
+session-heartbeat) in `~/.claude/settings.json`. All three are fully
+independent — removing one doesn't affect the others.
 
 **Turn off the CLAUDE.md instructions only**: delete the block between
 `<!-- BEGIN claude-code-guardrails -->` and `<!-- END claude-code-guardrails -->`
@@ -162,6 +220,18 @@ before editing, same as install.
   it's tuned for Anthropic keys/tokens plus a few common secret-file
   patterns, not a general-purpose tool like `gitleaks` or `trufflehog`. If
   you need broader coverage, run one of those in CI in addition to this.
+- **deny-cross-project-edit** only recognizes a project if it (or an
+  ancestor of the target path) has a `.claude/settings.json` with
+  `project.slug` set — a directory with no such file, or one with only
+  `name`/`description` and no `slug`, isn't treated as "another project"
+  and edits to it go through unblocked. Its Bash coverage is a fixed list
+  of write-shaped verbs/redirects, not a full shell parser — an unusual way
+  of writing a file (a script that writes for you, an uncommon tool name)
+  can slip through the same way novel secret patterns can slip past
+  deny-secrets. It also can't see through indirection: a symlink whose
+  target resolves outside the foreign project, or a Bash command that
+  writes via a wrapper script rather than a recognized verb directly, is
+  not caught.
 
 ## License
 

@@ -9,7 +9,7 @@ python3 "$DIR/scripts/merge_claude_md.py" uninstall
 echo
 read -r -p "Also delete the hook files from ~/.claude/hooks? [y/N] " REPLY
 if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-    rm -f "$HOME/.claude/hooks/deny-secrets.sh" "$HOME/.claude/hooks/warn-secrets-posttooluse.sh" "$HOME/.claude/hooks/session-heartbeat.sh" "$HOME/.claude/hooks/lib/secret_scan.py" "$HOME/.claude/hooks/lib/secret_scan_posttooluse.py" "$HOME/.claude/hooks/lib/secret_patterns.py"
+    rm -f "$HOME/.claude/hooks/deny-secrets.sh" "$HOME/.claude/hooks/warn-secrets-posttooluse.sh" "$HOME/.claude/hooks/session-heartbeat.sh" "$HOME/.claude/hooks/deny-cross-project-edit.sh" "$HOME/.claude/hooks/lib/secret_scan.py" "$HOME/.claude/hooks/lib/secret_scan_posttooluse.py" "$HOME/.claude/hooks/lib/secret_patterns.py" "$HOME/.claude/hooks/lib/cross_project_guard.py"
     rm -rf "$HOME/.claude/hooks/state/heartbeat"
     echo "Removed hook files and heartbeat counter state."
 else
